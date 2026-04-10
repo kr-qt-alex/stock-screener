@@ -14,7 +14,6 @@ env/
 # Environment & secrets
 backend/.env
 .env
-.env.*
 
 # Database & logs
 data/stocks.db
