@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getFetchLog } from '../api'
 
-export default function FetchProgress({ onClose }) {
+export default function FetchProgress({ onClose, onComplete }) {
   const [lines, setLines] = useState([])
   const [running, setRunning] = useState(true)
   const [expanded, setExpanded] = useState(false)
@@ -26,7 +26,10 @@ export default function FetchProgress({ onClose }) {
       const { data } = await getFetchLog()
       setLines(data.lines)
       setRunning(data.running)
-      if (!data.running) clearInterval(intervalRef.current)
+      if (!data.running) {
+        clearInterval(intervalRef.current)
+        onComplete?.()
+      }
     } catch {
       // backend may be momentarily unavailable; keep trying
     }

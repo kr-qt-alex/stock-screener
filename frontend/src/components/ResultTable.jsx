@@ -43,7 +43,10 @@ const columns = [
       )
     },
   }),
-  columnHelper.accessor('name', { header: '名稱' }),
+  columnHelper.accessor('name', {
+    header: '名稱',
+    cell: i => i.getValue(),
+  }),
   columnHelper.accessor('industry', {
     header: '產業',
     cell: i => {
@@ -103,6 +106,29 @@ export default function ResultTable({ state, dispatch, onScreen }) {
     setTimeout(onScreen, 0)
   }
 
+  function exportCSV() {
+    const headers = ['代號', '名稱', '產業', '股價', '本益比', '殖利率(%)', '市值(億)', '成交量', '最近月營收(千元)']
+    const rows = state.results.map(s => [
+      s.symbol,
+      s.name ?? '',
+      s.industry || s.sector || '',
+      s.price ?? '',
+      s.pe_ratio ?? '',
+      s.dividend_yield ?? '',
+      s.market_cap != null ? (s.market_cap / 1e8).toFixed(0) : '',
+      s.volume ?? '',
+      s.monthly_revenue ?? '',
+    ])
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `台股篩選_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const SORTABLE = {
     'price': 'price',
     'pe_ratio': 'pe_ratio',
@@ -135,9 +161,22 @@ export default function ResultTable({ state, dispatch, onScreen }) {
   }
 
   return (
+    <>
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
       <div className="px-4 py-3 border-b flex items-center justify-between">
         <span className="text-sm font-semibold text-gray-700">篩選結果 ({state.total} 檔)</span>
+        <button
+          onClick={exportCSV}
+          disabled={!state.results.length}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          匯出 CSV
+        </button>
       </div>
 
       <div className="overflow-x-auto">
@@ -218,5 +257,7 @@ export default function ResultTable({ state, dispatch, onScreen }) {
         </div>
       )}
     </div>
+
+</>
   )
 }

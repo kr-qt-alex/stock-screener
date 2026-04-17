@@ -38,7 +38,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, '..', 'data', 'stocks.db')
 STOCKS_JSON = os.path.join(BASE_DIR, 'tw_stocks.json')
 
-MAX_WORKERS = 1          # yfinance shares a global session — concurrent requests corrupt the crumb
+MAX_WORKERS = 5          # yfinance 0.2.x handles concurrent crumbs safely
 REQUEST_DELAY = 0.3      # seconds between requests
 
 CREATE_TABLE_SQL = """
