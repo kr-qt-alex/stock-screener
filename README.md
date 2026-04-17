@@ -60,8 +60,8 @@ cd backend
 
 # 每次開新 terminal 都需要先啟動虛擬環境
 source venv/Scripts/activate        # Git Bash / bash
-# venv\Scripts\Activate.ps1         # PowerShell
-# venv\Scripts\activate.bat         # cmd
+venv\Scripts\Activate.ps1           # PowerShell
+venv\Scripts\activate.bat           # cmd
 
 # 啟動後端
 python -m uvicorn main:app --reload

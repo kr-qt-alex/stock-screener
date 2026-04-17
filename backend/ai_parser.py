@@ -19,14 +19,18 @@ AI_ENABLED = os.getenv('AI_ENABLED', 'true').lower() == 'true'
 
 _FIELDS_DESC = """\
 可用欄位與運算子：
-  - sector (產業): 金融/半導體/傳產/電子/生技醫療/傳媒/原物料/能源/不動產/民生消費/非必需消費/公用事業
+  - sector (大產業): 金融/傳產/電子/生技醫療/傳媒/原物料/能源/不動產/民生消費/非必需消費/公用事業/其他
+    ※ 注意：台積電、聯發科等半導體公司屬於「電子」類別
+  - industry (細產業，更精細的分類，eq/lte/gte 等): 半導體/半導體設備/電子零組件/消費電子/電腦硬體/應用軟體/
+    系統軟體/資訊服務/通訊設備/銀行/壽險/產險/生技/製藥/醫療器材/建設開發/工業機械/電氣設備/鋼鐵/化學/食品/
+    汽車零件/紡織/餐飲 等（用 eq 精確比對）
   - pe_ratio (本益比): 數值，運算子 gt/gte/lt/lte/eq
   - forward_pe (預估本益比): 數值
   - dividend_yield (殖利率 %): 數值
   - market_cap (市值 TWD): 數值
   - price (股價): 數值
   - volume (成交量): 數值
-  - market_type (市場): listed(上市) / otc(上櫃)
+  - market_type (市場): listed(上市) / otc(上櫃) / emerging(興櫃)
 """
 
 _OUTPUT_FORMAT = """\

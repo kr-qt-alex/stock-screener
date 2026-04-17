@@ -21,6 +21,12 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, date
 
+# Force UTF-8 output on Windows to prevent mojibake with Chinese characters
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+if sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8')
+
 # Make sure we can import from the backend directory
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
@@ -44,6 +50,8 @@ except ImportError:
 DATA_RETENTION_YEARS = float(os.getenv('DATA_RETENTION_YEARS', '1'))
 DB_PATH = os.path.abspath(os.path.join(BACKEND_DIR, '..', 'data', 'stocks.db'))
 STOCKS_JSON = os.path.join(BACKEND_DIR, 'tw_stocks.json')
+
+BATCH_SIZE = 50   # symbols per yf.download() call
 
 # ---------------------------------------------------------------------------
 # DB – table & index creation
@@ -162,34 +170,6 @@ def insert_history(
 
 
 # ---------------------------------------------------------------------------
-# Per-symbol fetch
-# ---------------------------------------------------------------------------
-
-def fetch_symbol(
-    conn: sqlite3.Connection,
-    symbol: str,
-    fetch_start: date,
-    fetch_end: date,
-    skip_dates: set[str],
-) -> int:
-    """Download OHLCV for *symbol* and insert missing rows.  Returns insert count."""
-    try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(
-            start=fetch_start.strftime('%Y-%m-%d'),
-            # yfinance end is exclusive, so add one day
-            end=(fetch_end + timedelta(days=1)).strftime('%Y-%m-%d'),
-            auto_adjust=False,
-        )
-        if hist.empty:
-            return 0
-        return insert_history(conn, symbol, hist, skip_dates)
-    except Exception as exc:
-        print(f"    ERROR: {exc}")
-        return 0
-
-
-# ---------------------------------------------------------------------------
 # Main routine
 # ---------------------------------------------------------------------------
 
@@ -204,6 +184,8 @@ def run_fetch(full: bool = False) -> None:
     full=True (gap-check):
         For each symbol, compare the entire retention window against the DB
         and insert any missing trading days.
+
+    Uses yf.download() in batches of BATCH_SIZE for dramatically fewer API calls.
     """
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -232,19 +214,21 @@ def run_fetch(full: bool = False) -> None:
     init_table(conn)
     prune_old_data(conn, cutoff_str)
 
-    total_inserted = 0
+    # ------------------------------------------------------------------
+    # Phase 1: scan DB to determine which symbols need fetching
+    # ------------------------------------------------------------------
+    print("\n  Scanning existing data...", flush=True)
+    to_fetch: list[tuple[str, str, date, set]] = []  # (symbol, name, fetch_start, skip_dates)
     skipped = 0
 
-    for idx, stock in enumerate(stocks, start=1):
+    for stock in stocks:
         symbol = stock['symbol']
         name = stock.get('name', symbol)
 
         if full:
-            # Full mode: load all existing dates, fetch whole window, insert gaps
             existing = get_existing_dates(conn, symbol, cutoff_str)
             fetch_start = cutoff
         else:
-            # Incremental mode: only fetch from the day after the last recorded date
             last_date_str = get_last_date(conn, symbol, cutoff_str)
             if last_date_str is None:
                 fetch_start = cutoff
@@ -253,29 +237,104 @@ def run_fetch(full: bool = False) -> None:
                 last_date_obj = datetime.strptime(last_date_str, '%Y-%m-%d').date()
                 if last_date_obj >= yesterday:
                     skipped += 1
-                    continue  # already up to date
+                    continue
                 fetch_start = last_date_obj + timedelta(days=1)
-                existing = set()  # new range, no overlap to check
+                existing = set()
 
         if fetch_start > yesterday:
             skipped += 1
             continue
 
+        to_fetch.append((symbol, name, fetch_start, existing))
+
+    n_to_fetch = len(to_fetch)
+    print(f"  {skipped} already up-to-date  |  {n_to_fetch} to fetch", flush=True)
+
+    total_inserted = 0
+
+    if n_to_fetch == 0:
+        conn.close()
+        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Finished.")
+        print(f"  Inserted : 0 rows")
+        print(f"  Skipped  : {skipped} symbols (already up-to-date)")
+        print(f"  DB       : {DB_PATH}")
+        return
+
+    # ------------------------------------------------------------------
+    # Phase 2: batch download and insert
+    # ------------------------------------------------------------------
+    n_batches = (n_to_fetch + BATCH_SIZE - 1) // BATCH_SIZE
+
+    for batch_idx in range(n_batches):
+        batch = to_fetch[batch_idx * BATCH_SIZE:(batch_idx + 1) * BATCH_SIZE]
+        symbol_list = [s[0] for s in batch]
+        min_start = min(s[2] for s in batch)
+
         print(
-            f"[{idx}/{len(stocks)}] {symbol} ({name})  "
-            f"{fetch_start} → {yesterday_str} ...",
-            end=' ', flush=True,
+            f"\n>>> Batch {batch_idx + 1}/{n_batches}"
+            f" ({len(batch)} symbols, from {min_start.strftime('%Y-%m-%d')})",
+            flush=True,
         )
 
-        n = fetch_symbol(conn, symbol, fetch_start, yesterday, existing)
-        total_inserted += n
-        print(f"+{n} rows")
+        # Fetch the whole batch in a single API call
+        raw_map: dict[str, pd.DataFrame] = {}
+        try:
+            if len(symbol_list) == 1:
+                df = yf.download(
+                    symbol_list[0],
+                    start=min_start.strftime('%Y-%m-%d'),
+                    end=(yesterday + timedelta(days=1)).strftime('%Y-%m-%d'),
+                    auto_adjust=False,
+                    progress=False,
+                )
+                raw_map[symbol_list[0]] = df
+            else:
+                raw = yf.download(
+                    symbol_list,
+                    start=min_start.strftime('%Y-%m-%d'),
+                    end=(yesterday + timedelta(days=1)).strftime('%Y-%m-%d'),
+                    auto_adjust=False,
+                    progress=False,
+                    group_by='ticker',
+                )
+                for sym in symbol_list:
+                    try:
+                        sym_df = raw[sym].copy().dropna(how='all')
+                        raw_map[sym] = sym_df
+                    except Exception:
+                        raw_map[sym] = pd.DataFrame()
+        except Exception as exc:
+            print(f"  Batch download error: {exc}", flush=True)
+            for sym_idx, (symbol, name, _, _) in enumerate(batch):
+                pos = batch_idx * BATCH_SIZE + sym_idx + 1
+                print(f"[{pos}/{n_to_fetch}] {symbol} ({name}) - skipped (batch error)", flush=True)
+            time.sleep(3)
+            continue
 
-        # Polite rate-limiting: longer pause every 10 requests
-        if idx % 10 == 0:
-            time.sleep(2)
-        else:
-            time.sleep(0.5)
+        # Process each symbol in the batch
+        for sym_idx, (symbol, name, fetch_start, skip_dates) in enumerate(batch):
+            pos = batch_idx * BATCH_SIZE + sym_idx + 1
+            hist = raw_map.get(symbol, pd.DataFrame())
+
+            if hist is None or hist.empty:
+                print(f"[{pos}/{n_to_fetch}] {symbol} ({name}) - no data", flush=True)
+                continue
+
+            # Trim to this symbol's individual start date
+            # (batch may have fetched earlier rows for symbols with older min_start)
+            start_str = fetch_start.strftime('%Y-%m-%d')
+            date_strs = hist.index.strftime('%Y-%m-%d')
+            hist = hist[date_strs >= start_str]
+
+            if hist.empty:
+                print(f"[{pos}/{n_to_fetch}] {symbol} ({name}) - no new data", flush=True)
+                continue
+
+            n = insert_history(conn, symbol, hist, skip_dates)
+            total_inserted += n
+            print(f"[{pos}/{n_to_fetch}] {symbol} ({name}) +{n} rows", flush=True)
+
+        time.sleep(1)  # polite pause between batches
 
     conn.close()
     print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Finished.")
