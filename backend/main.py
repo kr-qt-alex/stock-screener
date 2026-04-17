@@ -354,3 +354,18 @@ async def fetch_log():
     return {"running": running, "lines": [l.rstrip('\n') for l in lines[-200:]]}
 
 
+@app.get("/api/stock/{symbol}/prices")
+async def stock_prices(symbol: str, days: int = 90):
+    """Return OHLCV history for a single stock from daily_prices table."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT date, open, high, low, close, adj_close, volume
+               FROM daily_prices WHERE symbol = ?
+               ORDER BY date DESC LIMIT ?""",
+            (symbol, days),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return {"symbol": symbol, "prices": [dict(r) for r in reversed(rows)]}
+
+

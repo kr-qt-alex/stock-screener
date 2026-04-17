@@ -15,5 +15,7 @@ export const triggerFetch = () => api.post('/api/fetch')
 export const triggerFullFetch = () => api.post('/api/fetch/full')
 export const getFetchLog = () => api.get('/api/fetch/log')
 export const getDataRange = () => api.get('/api/data/range')
+export const getStockPrices = (symbol, days = 90) =>
+  api.get(`/api/stock/${encodeURIComponent(symbol)}/prices`, { params: { days } })
 
 export default api

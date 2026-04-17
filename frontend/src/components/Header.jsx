@@ -44,10 +44,15 @@ export default function Header({ mode, dispatch }) {
     }
   }
 
+  const handleFetchComplete = () => {
+    setFetching(false)
+    loadRange()
+  }
+
   const handleLogClose = () => {
     setShowLog(false)
     setFetching(false)
-    loadRange()  // refresh date range after fetch completes
+    loadRange()
   }
 
   const hasRange = dateRange.from && dateRange.to
@@ -115,7 +120,7 @@ export default function Header({ mode, dispatch }) {
         </div>
       </header>
 
-      {showLog && <FetchProgress onClose={handleLogClose} />}
+      {showLog && <FetchProgress onClose={handleLogClose} onComplete={handleFetchComplete} />}
     </>
   )
 }
