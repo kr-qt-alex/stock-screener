@@ -7,3 +7,5 @@ aiosqlite
 python-dotenv
 apscheduler>=3.10.0
 pandas
+beautifulsoup4
+python-dateutil

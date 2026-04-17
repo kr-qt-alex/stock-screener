@@ -44,9 +44,12 @@ const columns = [
     },
   }),
   columnHelper.accessor('name', { header: '名稱' }),
-  columnHelper.accessor('sector', {
+  columnHelper.accessor('industry', {
     header: '產業',
-    cell: i => <span className="text-xs px-2 py-0.5 bg-gray-100 rounded-full">{i.getValue() || '-'}</span>,
+    cell: i => {
+      const value = i.getValue() || i.row.original.sector || '-'
+      return <span className="text-xs px-2 py-0.5 bg-gray-100 rounded-full">{value}</span>
+    },
   }),
   columnHelper.accessor('price', {
     header: '股價',
@@ -72,13 +75,12 @@ const columns = [
     header: '成交量',
     cell: i => formatVolume(i.getValue()),
   }),
-  columnHelper.accessor('revenue_growth', {
-    header: '營收成長',
+  columnHelper.accessor('monthly_revenue', {
+    header: '最近月營收(千元)',
     cell: i => {
       const v = i.getValue()
-      if (v == null) return '-'
-      const pct = (v * 100).toFixed(1)
-      return <span className={v >= 0 ? 'text-green-600' : 'text-red-500'}>{v >= 0 ? '+' : ''}{pct}%</span>
+      if (v == null) return <span className="text-gray-300">-</span>
+      return <span>{v.toLocaleString()}</span>
     },
   }),
 ]
@@ -107,7 +109,7 @@ export default function ResultTable({ state, dispatch, onScreen }) {
     'dividend_yield': 'dividend_yield',
     'market_cap': 'market_cap',
     'volume': 'volume',
-    'revenue_growth': 'revenue_growth',
+    'monthly_revenue': 'monthly_revenue',
   }
 
   if (state.loading) {
@@ -156,7 +158,7 @@ export default function ResultTable({ state, dispatch, onScreen }) {
                       } ${isActive ? 'text-teal-700' : ''}`}
                     >
                       {flexRender(header.column.columnDef.header, header.getContext())}
-                      {isActive && <span className="ml-1">{state.sortOrder === 'desc' ? '▼' : '▲'}</span>}
+                      {isActive && <span className="ml-1">{state.sortOrder === 'desc' ? '▲' : '▼'}</span>}
                     </th>
                   )
                 })}

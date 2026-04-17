@@ -33,6 +33,8 @@ class StockResult(BaseModel):
     name: Optional[str] = None
     sector: Optional[str] = None
     sector_en: Optional[str] = None
+    industry: Optional[str] = None
+    industry_en: Optional[str] = None
     market_type: Optional[str] = None
     price: Optional[float] = None
     pe_ratio: Optional[float] = None
@@ -42,7 +44,7 @@ class StockResult(BaseModel):
     volume: Optional[int] = None
     week_52_high: Optional[float] = None
     week_52_low: Optional[float] = None
-    revenue_growth: Optional[float] = None
+    monthly_revenue: Optional[int] = None
 
 
 class ScreenResponse(BaseModel):

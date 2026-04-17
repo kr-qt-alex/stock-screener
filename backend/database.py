@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS stocks (
     name TEXT,
     sector TEXT,
     sector_en TEXT,
+    industry TEXT,
+    industry_en TEXT,
     market_type TEXT,
     price REAL,
     pe_ratio REAL,
@@ -20,6 +22,7 @@ CREATE TABLE IF NOT EXISTS stocks (
     week_52_high REAL,
     week_52_low REAL,
     revenue_growth REAL,
+    monthly_revenue INTEGER,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -60,6 +63,15 @@ def init_db():
     conn.execute(CREATE_DAILY_PRICES_SQL)
     for idx_sql in CREATE_DAILY_INDEXES_SQL:
         conn.execute(idx_sql)
+    # Migrate existing DB: add columns if missing
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(stocks)")}
+    for col, definition in [
+        ('industry',         'TEXT'),
+        ('industry_en',      'TEXT'),
+        ('monthly_revenue',  'INTEGER'),
+    ]:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE stocks ADD COLUMN {col} {definition}")
     conn.commit()
     conn.close()
 

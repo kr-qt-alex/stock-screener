@@ -7,12 +7,13 @@ export const CONDITION_LIBRARY = [
       { field: 'dividend_yield', label: '殖利率 近12月 (%)', type: 'number', defaultOperator: 'gte', defaultValue: 3 },
       { field: 'market_cap', label: '市值 (億)', type: 'number', defaultOperator: 'gte', defaultValue: 10000000000, displayDivider: 100000000, displayUnit: '億' },
       { field: 'price', label: '股價', type: 'number', defaultOperator: 'lte', defaultValue: 100 },
+      { field: 'monthly_revenue', label: '最近月營收 (千元)', type: 'number', defaultOperator: 'gte', defaultValue: 100000 },
     ]
   },
   {
     category: '族群分類',
     conditions: [
-      { field: 'sector', label: '產業分類', type: 'select', dynamicOptions: true, options: [], defaultOperator: 'eq', defaultValue: '電子' },
+      { field: 'industry_or_sector', label: '產業', type: 'select', dynamicOptions: 'industry_options', options: [], defaultOperator: 'eq', defaultValue: '電子' },
       { field: 'market_type', label: '市場別', type: 'select', options: ['listed', 'otc', 'emerging'], optionLabels: { listed: '上市', otc: '上櫃', emerging: '興櫃' }, defaultOperator: 'eq', defaultValue: 'listed' },
     ]
   },
@@ -22,12 +23,6 @@ export const CONDITION_LIBRARY = [
       { field: 'week_52_high', label: '52週最高', type: 'number', defaultOperator: 'lte', defaultValue: 100 },
       { field: 'week_52_low', label: '52週最低', type: 'number', defaultOperator: 'gte', defaultValue: 50 },
       { field: 'volume', label: '成交量', type: 'number', defaultOperator: 'gte', defaultValue: 1000000 },
-    ]
-  },
-  {
-    category: '成長力',
-    conditions: [
-      { field: 'revenue_growth', label: '營收成長率 (%)', type: 'number', defaultOperator: 'gte', defaultValue: 0.1 },
     ]
   },
 ]

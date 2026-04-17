@@ -7,6 +7,8 @@ const api = axios.create({
 
 export const screenStocks = (payload) => api.post('/api/screen', payload)
 export const getSectors = () => api.get('/api/sectors')
+export const getIndustries = () => api.get('/api/industries')
+export const getIndustryOptions = () => api.get('/api/industry_options')
 export const getHealth = () => api.get('/api/health')
 export const getSummary = (results, query) => api.post('/api/summarize', { results, query })
 export const triggerFetch = () => api.post('/api/fetch')
