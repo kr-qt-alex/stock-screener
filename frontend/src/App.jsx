@@ -24,6 +24,7 @@ const initialState = {
   libraryOpen: false,
   nlQuery: '',
   parsedConditions: null,
+  aiReason: null,
   results: [],
   total: 0,
   page: 1,
@@ -40,7 +41,7 @@ let nextId = 10
 function reducer(state, action) {
   switch (action.type) {
     case 'SET_MODE':
-      return { ...state, mode: action.payload, results: [], total: 0, error: null, parsedConditions: null }
+      return { ...state, mode: action.payload, results: [], total: 0, error: null, parsedConditions: null, aiReason: null }
     case 'ADD_BLOCK':
       return { ...state, blocks: [...state.blocks, { id: `block-${++nextId}`, type: 'AND', rules: [] }] }
     case 'REMOVE_BLOCK':
@@ -79,7 +80,7 @@ function reducer(state, action) {
     case 'SET_NL_QUERY':
       return { ...state, nlQuery: action.payload }
     case 'SET_PARSED':
-      return { ...state, parsedConditions: action.payload }
+      return { ...state, parsedConditions: action.payload.conditions, aiReason: action.payload.reason ?? null }
     case 'SET_RESULTS':
       return { ...state, results: action.payload.results, total: action.payload.total }
     case 'SET_LOADING':
@@ -110,7 +111,7 @@ export default function App() {
           <div className="space-y-4">
             <NLSearchBar state={state} dispatch={dispatch} onScreen={runScreen} />
             {state.parsedConditions && (
-              <ConditionChips conditions={state.parsedConditions} />
+              <ConditionChips conditions={state.parsedConditions} reason={state.aiReason} />
             )}
           </div>
         )}

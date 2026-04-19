@@ -36,6 +36,7 @@ _FIELDS_DESC = """\
 _OUTPUT_FORMAT = """\
 只輸出以下 JSON 格式，不要任何說明文字：
 {
+  "reason": "簡短說明為何選擇這些條件（1-2句中文）",
   "conditions": [
     {
       "block_type": "AND",
@@ -142,8 +143,8 @@ def _extract_json(text: str) -> dict:
 # Public async interface
 # ---------------------------------------------------------------------------
 
-async def parse_natural_language(query: str) -> Filters:
-    """Parse a natural-language screening query into a Filters object via Claude CLI."""
+async def parse_natural_language(query: str) -> tuple[Filters, str]:
+    """Parse a natural-language screening query into a (Filters, reason) tuple via Claude CLI."""
     if not AI_ENABLED:
         raise ValueError("AI 功能已關閉（AI_ENABLED=false），請使用手動篩選模式")
 
@@ -156,4 +157,5 @@ async def parse_natural_language(query: str) -> Filters:
     if "error" in data:
         raise ValueError(data["error"])
 
-    return Filters(**data)
+    reason = data.pop("reason", "")
+    return Filters(**data), reason
