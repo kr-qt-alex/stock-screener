@@ -50,6 +50,7 @@ class StockResult(BaseModel):
 class ScreenResponse(BaseModel):
     mode: str
     parsed_conditions: Optional[Filters] = None
+    ai_reason: Optional[str] = None
     results: List[StockResult]
     total: int
     page: int

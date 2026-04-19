@@ -361,5 +361,6 @@ if __name__ == '__main__':
             'missing trading days instead of only fetching recent data'
         ),
     )
+    parser.add_argument('--skip-if-fresh', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     run_fetch(full=args.full)

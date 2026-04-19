@@ -16,7 +16,7 @@ import os
 import sys
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from datetime import datetime
 
 # Force UTF-8 output on Windows to prevent mojibake with Chinese characters
@@ -38,8 +38,28 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, '..', 'data', 'stocks.db')
 STOCKS_JSON = os.path.join(BASE_DIR, 'tw_stocks.json')
 
-MAX_WORKERS = 1          # yfinance shares a global session — concurrent requests corrupt the crumb
+MAX_WORKERS = 5          # yfinance 0.2.x handles concurrent crumbs safely
 REQUEST_DELAY = 0.3      # seconds between requests
+
+_crumb_lock = threading.Lock()
+_crumb_refreshing = False
+
+
+def _refresh_crumb() -> None:
+    """Force yfinance to re-acquire a fresh crumb."""
+    global _crumb_refreshing
+    with _crumb_lock:
+        if _crumb_refreshing:
+            return
+        _crumb_refreshing = True
+    try:
+        yf.Ticker("^TWII").fast_info
+    except Exception:
+        pass
+    finally:
+        with _crumb_lock:
+            _crumb_refreshing = False
+
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS stocks (
@@ -106,13 +126,24 @@ def determine_market_type(symbol: str) -> str:
     return 'listed'
 
 
+def _fetch_info(symbol: str) -> dict:
+    """Run ticker.info in an isolated executor so we can apply a hard timeout."""
+    return yf.Ticker(symbol).info
+
+
 def fetch_stock(symbol: str, name: str) -> dict | None:
     """Fetch stock info from yfinance. Retries up to 3 times on rate-limit errors."""
+    TIMEOUT = 20  # seconds per attempt — prevents curl_cffi from hanging forever
     for attempt in range(3):
         try:
-            time.sleep(REQUEST_DELAY if attempt == 0 else 10 * attempt)
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
+            time.sleep(REQUEST_DELAY if attempt == 0 else 2)
+            with ThreadPoolExecutor(max_workers=1) as _ex:
+                _f = _ex.submit(_fetch_info, symbol)
+                try:
+                    info = _f.result(timeout=TIMEOUT)
+                except TimeoutError:
+                    print(f"  Timeout fetching {symbol}, skipping...")
+                    return None
             if not info or not isinstance(info, dict):
                 return None
 
@@ -162,12 +193,18 @@ def fetch_stock(symbol: str, name: str) -> dict | None:
             }
         except Exception as e:
             err = str(e)
-            if 'Too Many Requests' in err or '401' in err or '429' in err or 'Crumb' in err:
-                if attempt < 2:
-                    wait = 30 * (attempt + 1)
-                    print(f"  Rate limited on {symbol}, waiting {wait}s (attempt {attempt + 1}/3)...")
-                    time.sleep(wait)
-                    continue
+            is_rate_limit = '429' in err or 'Too Many Requests' in err
+            is_crumb = 'Crumb' in err or ('401' in err and 'Unauthorized' in err)
+            if is_rate_limit and attempt < 2:
+                wait = 15 * (attempt + 1)
+                print(f"  Rate limited on {symbol}, waiting {wait}s (attempt {attempt + 1}/3)...")
+                time.sleep(wait)
+                continue
+            elif is_crumb and attempt < 2:
+                print(f"  Crumb error on {symbol}, refreshing session (attempt {attempt + 1}/3)...")
+                _refresh_crumb()
+                time.sleep(3)
+                continue
             print(f"  Error fetching {symbol}: {e}")
             return None
     return None
@@ -221,11 +258,31 @@ def upsert_stock(conn: sqlite3.Connection, data: dict) -> None:
     )
 
 
+def _is_fresh_today(conn: sqlite3.Connection) -> tuple[bool, int, int]:
+    """Return (is_fresh, fresh_count, total_count). Fresh = >=90% updated today."""
+    today = datetime.now().strftime('%Y-%m-%d')
+    total = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
+    fresh = conn.execute(
+        "SELECT COUNT(*) FROM stocks WHERE date(updated_at) = ?", (today,)
+    ).fetchone()[0]
+    return (total > 0 and fresh >= total * 0.9), fresh, total
+
+
 def main() -> None:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
     with open(STOCKS_JSON, 'r', encoding='utf-8') as f:
         stocks = json.load(f)
+
+    conn_check = sqlite3.connect(DB_PATH)
+    init_db(conn_check)
+    if '--skip-if-fresh' in sys.argv:
+        is_fresh, fresh_count, total_count = _is_fresh_today(conn_check)
+        if is_fresh:
+            print(f"快照資料今日已更新（{fresh_count}/{total_count} 支），跳過抓取")
+            conn_check.close()
+            return
+    conn_check.close()
 
     # De-duplicate by symbol (keep last occurrence)
     seen: dict[str, dict] = {}
