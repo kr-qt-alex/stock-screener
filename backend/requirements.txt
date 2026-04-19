@@ -1,3 +1,4 @@
+# Python >= 3.10 required
 fastapi
 uvicorn[standard]
 yfinance
@@ -6,3 +7,5 @@ aiosqlite
 python-dotenv
 apscheduler>=3.10.0
 pandas
+beautifulsoup4
+python-dateutil

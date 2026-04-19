@@ -2,9 +2,10 @@ from typing import Tuple, List, Any
 from models import Filters
 
 ALLOWED_FIELDS = {
-    'sector', 'sector_en', 'market_type', 'price', 'pe_ratio',
-    'forward_pe', 'dividend_yield', 'market_cap', 'volume',
-    'week_52_high', 'week_52_low', 'revenue_growth'
+    'sector', 'sector_en', 'industry', 'industry_en', 'market_type',
+    'price', 'pe_ratio', 'forward_pe', 'dividend_yield', 'market_cap',
+    'volume', 'week_52_high', 'week_52_low', 'monthly_revenue',
+    'industry_or_sector',
 }
 
 OPERATOR_MAP = {
@@ -35,7 +36,10 @@ def build_where_clause(filters: Filters) -> Tuple[str, List[Any]]:
             op = OPERATOR_MAP.get(rule.operator)
             if op is None:
                 raise ValueError(f"Invalid operator: {rule.operator}")
-            rule_clauses.append(f"{rule.field} {op} ?")
+            if rule.field == 'industry_or_sector':
+                rule_clauses.append(f"COALESCE(NULLIF(industry, ''), sector) {op} ?")
+            else:
+                rule_clauses.append(f"{rule.field} {op} ?")
             params.append(rule.value)
 
         if not rule_clauses:
@@ -80,8 +84,9 @@ def build_query(
     # Use a CASE expression to push NULLs to the end of the result set
     # regardless of ASC/DESC order.
     select_sql = f"""
-        SELECT symbol, name, sector, sector_en, market_type, price, pe_ratio, forward_pe,
-               dividend_yield, market_cap, volume, week_52_high, week_52_low, revenue_growth
+        SELECT symbol, name, sector, sector_en, industry, industry_en, market_type,
+               price, pe_ratio, forward_pe, dividend_yield, market_cap, volume,
+               week_52_high, week_52_low, monthly_revenue
         FROM stocks
         WHERE {where_clause}
         ORDER BY CASE WHEN {sort_by} IS NULL THEN 1 ELSE 0 END, {sort_by} {sort_order}

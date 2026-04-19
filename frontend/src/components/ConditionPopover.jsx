@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { getFieldDef, OPERATORS } from '../constants/conditionLibrary'
-import { getSectors } from '../api'
+import { getSectors, getIndustries, getIndustryOptions } from '../api'
 
 export default function ConditionPopover({ rule, blockId, dispatch, onClose }) {
   const popRef = useRef(null)
@@ -8,7 +8,12 @@ export default function ConditionPopover({ rule, blockId, dispatch, onClose }) {
   const [dynamicOpts, setDynamicOpts] = useState([])
 
   useEffect(() => {
-    if (def?.dynamicOptions) {
+    if (!def?.dynamicOptions) return
+    if (def.dynamicOptions === 'industries') {
+      getIndustries().then(({ data }) => setDynamicOpts(data.industries)).catch(() => {})
+    } else if (def.dynamicOptions === 'industry_options') {
+      getIndustryOptions().then(({ data }) => setDynamicOpts(data.options)).catch(() => {})
+    } else {
       getSectors().then(({ data }) => setDynamicOpts(data.sectors)).catch(() => {})
     }
   }, [def?.dynamicOptions])

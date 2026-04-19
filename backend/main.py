@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -35,18 +36,23 @@ except ValueError:
 # ---------------------------------------------------------------------------
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
-_FETCH_DAILY_SCRIPT = os.path.join(_BACKEND_DIR, 'fetch_daily.py')
-_FETCH_OHLCV_SCRIPT = os.path.join(_BACKEND_DIR, 'scripts', 'fetch_ohlcv.py')
+_FETCH_DAILY_SCRIPT          = os.path.join(_BACKEND_DIR, 'fetch_daily.py')
+_FETCH_MONTHLY_REVENUE_SCRIPT = os.path.join(_BACKEND_DIR, 'scripts', 'fetch_monthly_revenue.py')
+_FETCH_OHLCV_SCRIPT          = os.path.join(_BACKEND_DIR, 'scripts', 'fetch_ohlcv.py')
 _LOG_PATH = os.path.abspath(os.path.join(_BACKEND_DIR, '..', 'data', 'fetch.log'))
 
 _running_procs: list[subprocess.Popen] = []
+_fetch_thread: threading.Thread | None = None
+_fetch_current_step: int = 0          # 1-3 while running, 0 when idle
+_fetch_steps_done: list[bool] = [False, False, False]
 
 
 def _is_fetching() -> bool:
-    """Return True if any fetch subprocess is still running."""
-    global _running_procs
+    """Return True if the fetch thread or any subprocess is still running."""
+    global _running_procs, _fetch_thread
     _running_procs = [p for p in _running_procs if p.poll() is None]
-    return bool(_running_procs)
+    thread_alive = _fetch_thread is not None and _fetch_thread.is_alive()
+    return bool(_running_procs) or thread_alive
 
 
 def _spawn(script: str, *args: str) -> None:
@@ -66,16 +72,48 @@ def _spawn(script: str, *args: str) -> None:
         log_fh.close()  # subprocess inherits its own fd copy
 
 
-def run_all_fetches() -> None:
-    """Trigger both the snapshot fetch and the OHLCV history fetch."""
+_STEP_LABELS = [
+    "━━ Step 1/3 ── 快照資料 (PE、殖利率、市值…) ━━",
+    "━━ Step 2/3 ── TWSE 月營收 ━━",
+    "━━ Step 3/3 ── OHLCV 歷史價格 (增量) ━━",
+]
+
+
+def _run_fetches_sequential(force: bool = False) -> None:
+    """Run all fetch scripts sequentially in a background thread."""
+    global _fetch_current_step, _fetch_steps_done
+    _fetch_steps_done = [False, False, False]
+    scripts = [_FETCH_DAILY_SCRIPT, _FETCH_MONTHLY_REVENUE_SCRIPT, _FETCH_OHLCV_SCRIPT]
+    extra_args = [] if force else ['--skip-if-fresh']
+    for i, script in enumerate(scripts):
+        _fetch_current_step = i + 1
+        with open(_LOG_PATH, 'ab') as log_fh:
+            log_fh.write(f"\n{_STEP_LABELS[i]}\n".encode())
+        with open(_LOG_PATH, 'ab') as log_fh:
+            kwargs = dict(stdout=log_fh, stderr=log_fh)
+            if sys.platform == 'win32':
+                kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+            proc = subprocess.Popen([sys.executable, script, *extra_args], **kwargs)
+            _running_procs.append(proc)
+            proc.wait()
+            _running_procs[:] = [p for p in _running_procs if p.poll() is None]
+        _fetch_steps_done[i] = True
+        with open(_LOG_PATH, 'ab') as log_fh:
+            log_fh.write(f"━━ Step {i+1}/3 完成 ━━\n".encode())
+    _fetch_current_step = 0
+
+
+def run_all_fetches(force: bool = False) -> None:
+    """Trigger all fetch scripts sequentially. force=True skips freshness check."""
+    if _is_fetching():
+        return  # already running, ignore duplicate trigger
     os.makedirs(os.path.dirname(_LOG_PATH), exist_ok=True)
-    # Truncate log so the panel always shows the latest run
+    mode_label = "強制重新抓取" if force else "自動更新（已是最新則跳過）"
     with open(_LOG_PATH, 'w', encoding='utf-8') as f:
-        f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 開始抓取資料...\n")
-        f.write("  Step 1/2 — 快照資料 (pe、殖利率、市值等)\n")
-        f.write("  Step 2/2 — OHLCV 歷史價格 (增量模式)\n\n")
-    _spawn(_FETCH_DAILY_SCRIPT)
-    _spawn(_FETCH_OHLCV_SCRIPT)
+        f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 開始抓取資料 ({mode_label})...\n\n")
+    global _fetch_thread
+    _fetch_thread = threading.Thread(target=_run_fetches_sequential, args=(force,), daemon=True)
+    _fetch_thread.start()
 
 
 # ---------------------------------------------------------------------------
@@ -164,22 +202,52 @@ async def get_sectors():
     return {"sectors": [r[0] for r in rows]}
 
 
+@app.get("/api/industries")
+async def get_industries():
+    """Return all distinct industry names that exist in the database."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT DISTINCT industry FROM stocks WHERE industry IS NOT NULL AND industry != '' ORDER BY industry"
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return {"industries": [r[0] for r in rows]}
+
+
+@app.get("/api/industry_options")
+async def get_industry_options():
+    """Return merged industry/sector options using the same fallback logic as the display:
+    industry if present, otherwise sector. Sorted alphabetically."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT DISTINCT COALESCE(NULLIF(industry, ''), sector) AS label
+            FROM stocks
+            WHERE label IS NOT NULL
+            ORDER BY label
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return {"options": [r[0] for r in rows]}
+
+
 @app.get("/api/fields")
 async def get_fields():
     """Return metadata for every filterable/sortable field."""
     return {
         "fields": [
-            {"key": "pe_ratio",       "label": "本益比",       "type": "number"},
-            {"key": "forward_pe",     "label": "預估本益比",   "type": "number"},
+            {"key": "pe_ratio",       "label": "本益比",           "type": "number"},
+            {"key": "forward_pe",     "label": "預估本益比",       "type": "number"},
             {"key": "dividend_yield", "label": "殖利率 近12月 (%)", "type": "number"},
-            {"key": "market_cap",     "label": "市值",         "type": "number"},
-            {"key": "price",          "label": "股價",         "type": "number"},
-            {"key": "volume",         "label": "成交量",       "type": "number"},
-            {"key": "week_52_high",   "label": "52週最高",     "type": "number"},
-            {"key": "week_52_low",    "label": "52週最低",     "type": "number"},
-            {"key": "revenue_growth", "label": "營收成長率",   "type": "number"},
-            {"key": "sector",         "label": "產業",         "type": "select"},
-            {"key": "market_type",    "label": "市場別",       "type": "select"},
+            {"key": "market_cap",     "label": "市值",             "type": "number"},
+            {"key": "price",          "label": "股價",             "type": "number"},
+            {"key": "volume",         "label": "成交量",           "type": "number"},
+            {"key": "week_52_high",    "label": "52週最高",              "type": "number"},
+            {"key": "week_52_low",    "label": "52週最低",              "type": "number"},
+            {"key": "monthly_revenue", "label": "最近月營收 (千元)",     "type": "number"},
+            {"key": "sector",         "label": "大產業",                "type": "select"},
+            {"key": "industry",       "label": "細產業",           "type": "select"},
+            {"key": "market_type",    "label": "市場別",           "type": "select",
+             "options": ["listed", "otc", "emerging"]},
         ]
     }
 
@@ -206,8 +274,9 @@ async def screen(req: ScreenRequest):
                     status_code=503,
                     detail="AI 功能已關閉（AI_ENABLED=false），請使用手動篩選模式",
                 )
-            filters = await parse_natural_language(req.query)
+            filters, ai_reason = await parse_natural_language(req.query)
         else:
+            ai_reason = None
             if not req.filters:
                 filters = Filters(conditions=[], block_logic='AND')
             else:
@@ -236,6 +305,7 @@ async def screen(req: ScreenRequest):
         return ScreenResponse(
             mode=req.mode,
             parsed_conditions=filters if filters.conditions else None,
+            ai_reason=ai_reason or None,
             results=results,
             total=total,
             page=req.page,
@@ -254,9 +324,9 @@ async def screen(req: ScreenRequest):
 async def trigger_fetch():
     """
     Manually kick off a background data-fetch (snapshot + OHLCV history).
-    Both scripts run independently of the web process.
+    Always forces a full re-fetch regardless of freshness.
     """
-    run_all_fetches()
+    run_all_fetches(force=True)
     return {"status": "started", "message": "快照資料與 OHLCV 歷史資料抓取已在背景執行"}
 
 
@@ -285,12 +355,34 @@ async def fetch_log():
     """Return recent lines from the fetch log and whether a fetch is still running."""
     running = _is_fetching()
     if not os.path.exists(_LOG_PATH):
-        return {"running": running, "lines": []}
+        return {"running": running, "current_step": _fetch_current_step,
+                "steps_done": _fetch_steps_done, "lines": []}
     try:
         with open(_LOG_PATH, 'r', encoding='utf-8', errors='replace') as f:
             lines = f.readlines()
     except OSError:
-        return {"running": running, "lines": []}
-    return {"running": running, "lines": [l.rstrip('\n') for l in lines[-200:]]}
+        return {"running": running, "current_step": _fetch_current_step,
+                "steps_done": _fetch_steps_done, "lines": []}
+    return {
+        "running": running,
+        "current_step": _fetch_current_step,
+        "steps_done": _fetch_steps_done,
+        "lines": [l.rstrip('\n') for l in lines[-300:]],
+    }
+
+
+@app.get("/api/stock/{symbol}/prices")
+async def stock_prices(symbol: str, days: int = 90):
+    """Return OHLCV history for a single stock from daily_prices table."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT date, open, high, low, close, adj_close, volume
+               FROM daily_prices WHERE symbol = ?
+               ORDER BY date DESC LIMIT ?""",
+            (symbol, days),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return {"symbol": symbol, "prices": [dict(r) for r in reversed(rows)]}
 
 

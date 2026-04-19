@@ -35,7 +35,7 @@ export function useScreener(state, dispatch) {
 
       dispatch({ type: 'SET_RESULTS', payload: { results: data.results, total: data.total } })
       if (data.parsed_conditions) {
-        dispatch({ type: 'SET_PARSED', payload: data.parsed_conditions })
+        dispatch({ type: 'SET_PARSED', payload: { conditions: data.parsed_conditions, reason: data.ai_reason } })
       }
     } catch (err) {
       const msg = err.response?.data?.detail || err.message || '篩選失敗，請稍後再試'

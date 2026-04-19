@@ -1,11 +1,14 @@
-export default function ConditionChips({ conditions }) {
-  if (!conditions || !conditions.conditions?.length) return null
+import { formatRuleLabel } from '../constants/conditionLibrary'
 
-  const opLabels = { gte: '≥', lte: '≤', gt: '>', lt: '<', eq: '=' }
+export default function ConditionChips({ conditions, reason }) {
+  if (!conditions || !conditions.conditions?.length) return null
 
   return (
     <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
       <p className="text-xs text-blue-600 font-medium mb-2">AI 解析結果</p>
+      {reason && (
+        <p className="text-xs text-gray-600 mb-3 leading-relaxed">{reason}</p>
+      )}
       <div className="flex flex-wrap gap-2">
         {conditions.conditions.map((block, bi) => (
           <div key={bi} className="flex flex-wrap gap-1.5 items-center">
@@ -19,7 +22,7 @@ export default function ConditionChips({ conditions }) {
             </span>
             {block.rules.map((rule, ri) => (
               <span key={ri} className="text-xs bg-blue-100 text-blue-800 px-3 py-1 rounded-full font-medium">
-                {rule.field} {opLabels[rule.operator] || rule.operator} {rule.value}
+                {formatRuleLabel(rule)}
               </span>
             ))}
           </div>
